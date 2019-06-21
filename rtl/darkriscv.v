@@ -80,36 +80,39 @@ module darkriscv
     output            RD,    // read enable
 
 `ifdef RISCV_FORMAL
-	output reg        rvfi_valid,
-	output reg [63:0] rvfi_order,
-	output reg [31:0] rvfi_insn,
-	output reg        rvfi_trap,
-	output reg        rvfi_halt,
-	output reg        rvfi_intr,
-	output reg [ 1:0] rvfi_mode,
+    output reg        rvfi_valid = 1'b0,
+    output reg [63:0] rvfi_order = 64'd0,
+    output reg [31:0] rvfi_insn = 32'd0,
+    output reg 	      rvfi_trap = 1'b0,
+    output reg 	      rvfi_halt = 1'b0,
+    output reg 	      rvfi_intr = 1'b0,
+    output reg [1:0]  rvfi_mode = 2'b11,
+
 	output reg [ 4:0] rvfi_rs1_addr,
 	output reg [ 4:0] rvfi_rs2_addr,
 	output reg [31:0] rvfi_rs1_rdata,
 	output reg [31:0] rvfi_rs2_rdata,
 	output reg [ 4:0] rvfi_rd_addr,
 	output reg [31:0] rvfi_rd_wdata,
+
 	output reg [31:0] rvfi_pc_rdata,
 	output reg [31:0] rvfi_pc_wdata,
+
 	output reg [31:0] rvfi_mem_addr,
 	output reg [ 3:0] rvfi_mem_rmask,
 	output reg [ 3:0] rvfi_mem_wmask,
 	output reg [31:0] rvfi_mem_rdata,
 	output reg [31:0] rvfi_mem_wdata,
 
-	output reg [63:0] rvfi_csr_mcycle_rmask,
-	output reg [63:0] rvfi_csr_mcycle_wmask,
-	output reg [63:0] rvfi_csr_mcycle_rdata,
-	output reg [63:0] rvfi_csr_mcycle_wdata,
-
-	output reg [63:0] rvfi_csr_minstret_rmask,
-	output reg [63:0] rvfi_csr_minstret_wmask,
-	output reg [63:0] rvfi_csr_minstret_rdata,
-	output reg [63:0] rvfi_csr_minstret_wdata,
+	// output reg [63:0] rvfi_csr_mcycle_rmask,
+	// output reg [63:0] rvfi_csr_mcycle_wmask,
+	// output reg [63:0] rvfi_csr_mcycle_rdata,
+	// output reg [63:0] rvfi_csr_mcycle_wdata,
+    //
+	// output reg [63:0] rvfi_csr_minstret_rmask,
+	// output reg [63:0] rvfi_csr_minstret_wmask,
+	// output reg [63:0] rvfi_csr_minstret_rdata,
+	// output reg [63:0] rvfi_csr_minstret_wdata,
 `endif
 
     output [3:0]  DEBUG      // old-school osciloscope based debug! :)
@@ -199,6 +202,7 @@ module darkriscv
     wire    RCC = FLUSH ? 0 : XRCC; // OPCODE==7'b0110011; //FCT3
     //wire    FCC = FLUSH ? 0 : XFCC; // OPCODE==7'b0001111; //FCT3
     //wire    CCC = FLUSH ? 0 : XCCC; // OPCODE==7'b1110011; //FCT3
+
 `ifdef __3STAGE__
     reg [31:0] NXPC2;       // 32-bit program counter t+2
 `endif
@@ -361,5 +365,143 @@ module darkriscv
 `endif
 
     assign DEBUG = { RES, FLUSH, WR, RD };
+
+`ifdef RISCV_FORMAL
+
+    always @(posedge clk) begin
+        rvfi_valid <= !RES; // && (launch_next_insn || HLT) && dbg_valid_insn;
+        rvfi_order <= RES ? 0 : rvfi_order + rvfi_valid;
+        rvfi_insn <= IDATA;
+        rvfi_trap <= HLT;
+		rvfi_halt <= HLT;
+        rvfi_intr <= rvfi_pc_rdata != rvfi_pc_wdata;
+        rvfi_mode <= 3;
+
+        // care: It do not check if the instruction is valid or not
+		rvfi_rs1_addr <= S1PTR;
+		rvfi_rs2_addr <= S2PTR;
+        rvfi_rs1_rdata <= S1PTR == 0 ? 0 : REG1[S1PTR];
+        rvfi_rs2_rdata <= S2PTR == 0 ? 0 : REG2[S2PTR];
+
+        rvfi_rd_addr = DPTR;
+        rvfi_rd_wdata = DPTR == 0 ? 0 : REG1[DPTR] == REG2[DPTR] ? REG1[DPTR] : 0;
+		rvfi_pc_rdata <= PC;
+        rvfi_pc_wdata <= NXPC;
+
+        rvfi_mem_addr = ;
+        rvfi_rmask = ;
+        rvfi_wmask = ;
+        rvfi_mem_rdata = ;
+        rvfi_mem_wdata = ;
+
+        // from picoRV32 (l. 2004)
+        casez (dbg_insn_opcode)
+            32'b 0000000_?????_000??_???_?????_0001011: begin // getq
+                rvfi_rs1_addr <= 0;
+                rvfi_rs1_rdata <= 0;
+            end
+            32'b 0000001_?????_?????_???_000??_0001011: begin // setq
+                rvfi_rd_addr <= 0;
+                rvfi_rd_wdata <= 0;
+            end
+            32'b 0000010_?????_00000_???_00000_0001011: begin // retirq
+                rvfi_rs1_addr <= 0;
+                rvfi_rs1_rdata <= 0;
+            end
+        endcase
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        if (!resetn) begin
+			rvfi_rd_addr <= 0;
+			rvfi_rd_wdata <= 0;
+		end else
+		if (cpuregs_write && !irq_state) begin
+			rvfi_rd_addr <= latched_rd;
+			rvfi_rd_wdata <= latched_rd ? cpuregs_wrdata : 0;
+		end else
+		if (rvfi_valid) begin
+			rvfi_rd_addr <= 0;
+			rvfi_rd_wdata <= 0;
+		end
+
+
+
+		if (!dbg_irq_call) begin
+			if (dbg_mem_instr) begin
+				rvfi_mem_addr <= 0;
+				rvfi_mem_rmask <= 0;
+				rvfi_mem_wmask <= 0;
+				rvfi_mem_rdata <= 0;
+				rvfi_mem_wdata <= 0;
+			end else
+			if (dbg_mem_valid && dbg_mem_ready) begin
+				rvfi_mem_addr <= dbg_mem_addr;
+				rvfi_mem_rmask <= dbg_mem_wstrb ? 0 : ~0;
+				rvfi_mem_wmask <= dbg_mem_wstrb;
+				rvfi_mem_rdata <= dbg_mem_rdata;
+				rvfi_mem_wdata <= dbg_mem_wdata;
+			end
+		end
+	end
+
+	always @* begin
+		rvfi_pc_wdata = dbg_irq_call ? dbg_irq_ret : dbg_insn_addr;
+
+		rvfi_csr_mcycle_rmask = 0;
+		rvfi_csr_mcycle_wmask = 0;
+		rvfi_csr_mcycle_rdata = 0;
+		rvfi_csr_mcycle_wdata = 0;
+
+		rvfi_csr_minstret_rmask = 0;
+		rvfi_csr_minstret_wmask = 0;
+		rvfi_csr_minstret_rdata = 0;
+		rvfi_csr_minstret_wdata = 0;
+
+		if (rvfi_valid && rvfi_insn[6:0] == 7'b 1110011 && rvfi_insn[13:12] == 3'b010) begin
+			if (rvfi_insn[31:20] == 12'h C00) begin
+				rvfi_csr_mcycle_rmask = 64'h 0000_0000_FFFF_FFFF;
+				rvfi_csr_mcycle_rdata = {32'h 0000_0000, rvfi_rd_wdata};
+			end
+			if (rvfi_insn[31:20] == 12'h C80) begin
+				rvfi_csr_mcycle_rmask = 64'h FFFF_FFFF_0000_0000;
+				rvfi_csr_mcycle_rdata = {rvfi_rd_wdata, 32'h 0000_0000};
+			end
+			if (rvfi_insn[31:20] == 12'h C02) begin
+				rvfi_csr_minstret_rmask = 64'h 0000_0000_FFFF_FFFF;
+				rvfi_csr_minstret_rdata = {32'h 0000_0000, rvfi_rd_wdata};
+			end
+			if (rvfi_insn[31:20] == 12'h C82) begin
+				rvfi_csr_minstret_rmask = 64'h FFFF_FFFF_0000_0000;
+				rvfi_csr_minstret_rdata = {rvfi_rd_wdata, 32'h 0000_0000};
+			end
+		end
+	end
+
+`endif
+
+
+
 
 endmodule
