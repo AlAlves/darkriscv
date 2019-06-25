@@ -368,7 +368,7 @@ module darkriscv
 
 `ifdef RISCV_FORMAL
 
-    always @(posedge clk) begin
+    always @(posedge CLK) begin
         rvfi_valid <= !RES; // && (launch_next_insn || HLT) && dbg_valid_insn;
         rvfi_order <= RES ? 0 : rvfi_order + rvfi_valid;
         rvfi_insn <= IDATA;
@@ -383,16 +383,32 @@ module darkriscv
         rvfi_rs1_rdata <= S1PTR == 0 ? 0 : REG1[S1PTR];
         rvfi_rs2_rdata <= S2PTR == 0 ? 0 : REG2[S2PTR];
 
-        rvfi_rd_addr = DPTR;
-        rvfi_rd_wdata = DPTR == 0 ? 0 : REG1[DPTR] == REG2[DPTR] ? REG1[DPTR] : 0;
+        rvfi_rd_addr <= DPTR;
+        rvfi_rd_wdata <= REG1[DPTR] == REG2[DPTR] ? REG1[DPTR] : 0;
 		rvfi_pc_rdata <= PC;
         rvfi_pc_wdata <= NXPC;
 
-        rvfi_mem_addr = ;
-        rvfi_rmask = ;
-        rvfi_wmask = ;
-        rvfi_mem_rdata = ;
-        rvfi_mem_wdata = ;
+
+		if (rvfi_pc_rdata != rvfi_pc_wdata) begin
+			rvfi_mem_addr <= 0;
+			rvfi_mem_rmask <= 0;
+			rvfi_mem_wmask <= 0;
+			rvfi_mem_rdata <= 0;
+			rvfi_mem_wdata <= 0;
+		end else
+		if (dbg_mem_valid && dbg_mem_ready) begin
+			rvfi_mem_addr <= dbg_mem_addr;
+			rvfi_mem_rmask <= dbg_mem_wstrb ? 0 : ~0;
+			rvfi_mem_wmask <= dbg_mem_wstrb;
+			rvfi_mem_rdata <= dbg_mem_rdata;
+			rvfi_mem_wdata <= dbg_mem_wdata;
+		end
+
+        rvfi_mem_addr <= DADDR;
+        rvfi_rmask <= BE; // ? 0 : ~0;
+        rvfi_wmask <= BE;
+        rvfi_mem_rdata <= DATAI;
+        rvfi_mem_wdata <= DATAO;
 
         // from picoRV32 (l. 2004)
         casez (dbg_insn_opcode)
@@ -410,6 +426,7 @@ module darkriscv
             end
         endcase
 
+    end
 
 
 
@@ -429,75 +446,71 @@ module darkriscv
 
 
 
+        // if (!resetn) begin
+		// 	rvfi_rd_addr <= 0;
+		// 	rvfi_rd_wdata <= 0;
+		// end else
+		// if (cpuregs_write && !irq_state) begin
+		// 	rvfi_rd_addr <= latched_rd;
+		// 	rvfi_rd_wdata <= latched_rd ? cpuregs_wrdata : 0;
+		// end else
+		// if (rvfi_valid) begin
+		// 	rvfi_rd_addr <= 0;
+		// 	rvfi_rd_wdata <= 0;
+		// end
+        //
+        //
+        //
+		// if (!dbg_irq_call) begin
+		// 	if (dbg_mem_instr) begin
+		// 		rvfi_mem_addr <= 0;
+		// 		rvfi_mem_rmask <= 0;
+		// 		rvfi_mem_wmask <= 0;
+		// 		rvfi_mem_rdata <= 0;
+		// 		rvfi_mem_wdata <= 0;
+		// 	end else
+		// 	if (dbg_mem_valid && dbg_mem_ready) begin
+		// 		rvfi_mem_addr <= dbg_mem_addr;
+		// 		rvfi_mem_rmask <= dbg_mem_wstrb ? 0 : ~0;
+		// 		rvfi_mem_wmask <= dbg_mem_wstrb;
+		// 		rvfi_mem_rdata <= dbg_mem_rdata;
+		// 		rvfi_mem_wdata <= dbg_mem_wdata;
+		// 	end
+		// end
+	    // end
 
-
-
-
-        if (!resetn) begin
-			rvfi_rd_addr <= 0;
-			rvfi_rd_wdata <= 0;
-		end else
-		if (cpuregs_write && !irq_state) begin
-			rvfi_rd_addr <= latched_rd;
-			rvfi_rd_wdata <= latched_rd ? cpuregs_wrdata : 0;
-		end else
-		if (rvfi_valid) begin
-			rvfi_rd_addr <= 0;
-			rvfi_rd_wdata <= 0;
-		end
-
-
-
-		if (!dbg_irq_call) begin
-			if (dbg_mem_instr) begin
-				rvfi_mem_addr <= 0;
-				rvfi_mem_rmask <= 0;
-				rvfi_mem_wmask <= 0;
-				rvfi_mem_rdata <= 0;
-				rvfi_mem_wdata <= 0;
-			end else
-			if (dbg_mem_valid && dbg_mem_ready) begin
-				rvfi_mem_addr <= dbg_mem_addr;
-				rvfi_mem_rmask <= dbg_mem_wstrb ? 0 : ~0;
-				rvfi_mem_wmask <= dbg_mem_wstrb;
-				rvfi_mem_rdata <= dbg_mem_rdata;
-				rvfi_mem_wdata <= dbg_mem_wdata;
-			end
-		end
-	end
-
-	always @* begin
-		rvfi_pc_wdata = dbg_irq_call ? dbg_irq_ret : dbg_insn_addr;
-
-		rvfi_csr_mcycle_rmask = 0;
-		rvfi_csr_mcycle_wmask = 0;
-		rvfi_csr_mcycle_rdata = 0;
-		rvfi_csr_mcycle_wdata = 0;
-
-		rvfi_csr_minstret_rmask = 0;
-		rvfi_csr_minstret_wmask = 0;
-		rvfi_csr_minstret_rdata = 0;
-		rvfi_csr_minstret_wdata = 0;
-
-		if (rvfi_valid && rvfi_insn[6:0] == 7'b 1110011 && rvfi_insn[13:12] == 3'b010) begin
-			if (rvfi_insn[31:20] == 12'h C00) begin
-				rvfi_csr_mcycle_rmask = 64'h 0000_0000_FFFF_FFFF;
-				rvfi_csr_mcycle_rdata = {32'h 0000_0000, rvfi_rd_wdata};
-			end
-			if (rvfi_insn[31:20] == 12'h C80) begin
-				rvfi_csr_mcycle_rmask = 64'h FFFF_FFFF_0000_0000;
-				rvfi_csr_mcycle_rdata = {rvfi_rd_wdata, 32'h 0000_0000};
-			end
-			if (rvfi_insn[31:20] == 12'h C02) begin
-				rvfi_csr_minstret_rmask = 64'h 0000_0000_FFFF_FFFF;
-				rvfi_csr_minstret_rdata = {32'h 0000_0000, rvfi_rd_wdata};
-			end
-			if (rvfi_insn[31:20] == 12'h C82) begin
-				rvfi_csr_minstret_rmask = 64'h FFFF_FFFF_0000_0000;
-				rvfi_csr_minstret_rdata = {rvfi_rd_wdata, 32'h 0000_0000};
-			end
-		end
-	end
+	// always @* begin
+	// 	rvfi_pc_wdata = dbg_irq_call ? dbg_irq_ret : dbg_insn_addr;
+    //
+	// 	rvfi_csr_mcycle_rmask = 0;
+	// 	rvfi_csr_mcycle_wmask = 0;
+	// 	rvfi_csr_mcycle_rdata = 0;
+	// 	rvfi_csr_mcycle_wdata = 0;
+    //
+	// 	rvfi_csr_minstret_rmask = 0;
+	// 	rvfi_csr_minstret_wmask = 0;
+	// 	rvfi_csr_minstret_rdata = 0;
+	// 	rvfi_csr_minstret_wdata = 0;
+    //
+	// 	if (rvfi_valid && rvfi_insn[6:0] == 7'b 1110011 && rvfi_insn[13:12] == 3'b010) begin
+	// 		if (rvfi_insn[31:20] == 12'h C00) begin
+	// 			rvfi_csr_mcycle_rmask = 64'h 0000_0000_FFFF_FFFF;
+	// 			rvfi_csr_mcycle_rdata = {32'h 0000_0000, rvfi_rd_wdata};
+	// 		end
+	// 		if (rvfi_insn[31:20] == 12'h C80) begin
+	// 			rvfi_csr_mcycle_rmask = 64'h FFFF_FFFF_0000_0000;
+	// 			rvfi_csr_mcycle_rdata = {rvfi_rd_wdata, 32'h 0000_0000};
+	// 		end
+	// 		if (rvfi_insn[31:20] == 12'h C02) begin
+	// 			rvfi_csr_minstret_rmask = 64'h 0000_0000_FFFF_FFFF;
+	// 			rvfi_csr_minstret_rdata = {32'h 0000_0000, rvfi_rd_wdata};
+	// 		end
+	// 		if (rvfi_insn[31:20] == 12'h C82) begin
+	// 			rvfi_csr_minstret_rmask = 64'h FFFF_FFFF_0000_0000;
+	// 			rvfi_csr_minstret_rdata = {rvfi_rd_wdata, 32'h 0000_0000};
+	// 		end
+	// 	end
+	// end
 
 `endif
 
